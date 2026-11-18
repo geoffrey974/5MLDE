@@ -1,0 +1,6 @@
+data:
+  source_url: "https://archive.ics.uci.edu/static/public/275/bike+sharing+dataset.zip"
+  raw_dir: "data/raw"
+  batches_dir: "data/batches"
+  processed_dir: "data/processed"
+  file: "hour.csv"
