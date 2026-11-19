@@ -45,7 +45,7 @@ Chaque lot est vérifié avant tout traitement : colonnes attendues, types, plag
 ### Suivi des expériences (Interface MLflow)
 Dans un terminal, laissé ouvert : 
 ```
-mlflow db upgrade sqlite://mlflow.db        # première fois uniquement : crée la base
+mlflow db upgrade sqlite:///mlflow.db     # première fois uniquement : crée la base
 mlflow server --backend-store-uri sqlite:///mlflow.db --artifacts-destination ./mlartifacts --host 127.0.0.1 --port 5000
 ```
 
@@ -104,6 +104,34 @@ Gestion des échecs :
 - **pas de reprise** sur le contrôle qualité : un lot invalide bloque la chaîne, aucun modèle n'est entraîné ;
 - **une seule exécution à la fois** (`limit=1`) ;
 - **alerte** à chaque échec : log `ALERTE`, ligne ajoutée dans `logs/alerts.jsonl`, et message envoyé au webhook `ALERT_WEBHOOK_URL` s'il est défini (Discord, Slack...).
+
+### API de prédiction (FastAPI)
+
+Avec MLflow démarré :
+```
+uvicorn bike_mlops.api.main:app --port 8000
+```
+Documentation interactive : http://127.0.0.1:8000/docs
+
+| Endpoint | Rôle |
+|---|---|
+| `GET /health` | état du service (`ok` / `degraded`) et version du modèle chargé |
+| `POST /predict` | prédiction du nombre de locations pour une heure donnée |
+| `POST /reload` | recharge le champion après une promotion ou un retour arrière |
+
+Exemple :
+```
+curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{"season": 1, "yr": 1, "mnth": 1, "hr": 8, "holiday": 0, "weekday": 2, "workingday": 1, "weathersit": 1, "temp": 0.3, "atemp": 0.3, "hum": 0.5, "windspeed": 0.2}'
+```
+Réponse : `{"prediction": 483.08, "model_name": "bike-demand", "model_version": "3"}`
+
+Le modèle servi est celui qui porte l'alias `champion` dans le registre. Chaque réponse indique sa version.
+
+Gestion des erreurs :
+- **422** : entrée invalide (champ manquant ou inconnu, mauvais type, valeur hors plage). Les plages sont les mêmes que celles du contrôle qualité.
+- **503** : aucun modèle chargé (MLflow indisponible au démarrage). L'API reste joignable et `/health` indique `degraded`.
+- **500** : erreur imprévue, avec un message générique. Le détail est uniquement dans les logs.
+
 
 ### Tests
 ```
