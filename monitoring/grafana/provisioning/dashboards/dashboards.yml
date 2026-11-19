@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: bike-mlops
+    folder: Bike MLOps
+    type: file
+    disableDeletion: true
+    options:
+      path: /var/lib/grafana/dashboards

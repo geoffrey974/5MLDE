@@ -93,5 +93,40 @@ def test_feedback_for_unknown_prediction_returns_404(client):
     assert client.post("/feedback", json={"prediction_id": 999, "actual": 10}).status_code == 404
 
 
+def metric(client, line_start: str) -> float:
+    """Valeur d'une série lue sur /metrics, 0 si elle n'existe pas encore."""
+    for line in client.get("/metrics").text.splitlines():
+        if line.startswith(line_start + " "):
+            return float(line.split()[-1])
+    return 0.0
+
+
+def test_metrics_endpoint_exposes_http_metrics(client):
+    client.get("/health")
+    body = client.get("/metrics").text
+    assert "http_requests_total" in body
+    assert "http_request_duration_seconds_bucket" in body
+
+
+def test_predictions_are_counted_by_version_and_status(client):
+    ok = 'bike_predictions_total{model_version="7",status="ok"}'
+    error = 'bike_predictions_total{model_version="7",status="error"}'
+    ok_before, error_before = metric(client, ok), metric(client, error)
+    client.post("/predict", json=VALID)
+    client.post("/predict", json={**VALID, "hr": 24})
+    assert metric(client, ok) == ok_before + 1
+    assert metric(client, error) == error_before + 1
+
+
+def test_feedback_error_is_measured(client):
+    count = 'bike_feedback_abs_error_count{model_version="7"}'
+    total = 'bike_feedback_abs_error_sum{model_version="7"}'
+    count_before, total_before = metric(client, count), metric(client, total)
+    prediction_id = client.post("/predict", json=VALID).json()["prediction_id"]
+    client.post("/feedback", json={"prediction_id": prediction_id, "actual": 133.46})
+    assert metric(client, count) == count_before + 1
+    assert metric(client, total) == pytest.approx(total_before + 10)
+
+
 def test_health_reports_model_version(client):
     assert client.get("/health").json() == {"status": "ok", "model_name": "bike-demand", "model_version": "7"}
