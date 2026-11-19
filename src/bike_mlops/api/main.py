@@ -1,15 +1,19 @@
-"""API de prédiction : sert le modèle champion du registre MLflow."""
+"""API de prédiction : sert le modèle champion du registre MLflow et enregistre chaque appel."""
 import logging
+import time
 from contextlib import asynccontextmanager
 
 import mlflow
 import mlflow.sklearn
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from mlflow import MlflowClient
 
-from bike_mlops.api.schemas import BikeFeatures, PredictionResponse
+from bike_mlops.api.schemas import BikeFeatures, FeedbackRequest, PredictionResponse
+from bike_mlops.api.storage import PredictionStore, get_database_url
 from bike_mlops.config import get_tracking_uri, load_config
 from bike_mlops.models.registry import CHAMPION
 
@@ -35,7 +39,9 @@ class ModelService:
         return self.version
 
 
-service = ModelService(load_config())
+cfg = load_config()
+service = ModelService(cfg)
+store = PredictionStore(get_database_url(cfg))
 
 
 @asynccontextmanager
@@ -49,6 +55,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Bike demand API", version="1.0", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_input(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Entrée invalide : réponse 422, et l'erreur est enregistrée comme les prédictions."""
+    if request.url.path == "/predict":
+        first = exc.errors()[0]
+        store.log_prediction(
+            model_version=service.version,
+            features=exc.body if isinstance(exc.body, dict) else None,
+            duration_ms=0.0,
+            status="error",
+            error=f"422 entrée invalide : {first['loc'][-1]} - {first['msg']}"[:500],
+        )
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @app.exception_handler(Exception)
@@ -70,13 +91,42 @@ def health() -> dict:
 
 @app.post("/predict", response_model=PredictionResponse)
 def predict(features: BikeFeatures) -> PredictionResponse:
-    """Prédit le nombre de locations pour une heure donnée."""
-    if service.model is None:
-        raise HTTPException(status_code=503, detail="Aucun modèle chargé")
-    X = pd.DataFrame([features.model_dump()])
-    # Une demande de vélos ne peut pas être négative
-    prediction = max(0.0, float(service.model.predict(X)[0]))
-    return PredictionResponse(prediction=round(prediction, 2), model_name=service.name, model_version=service.version)
+    """Prédit le nombre de locations pour une heure donnée (jamais négatif). Chaque appel est enregistré."""
+    start = time.perf_counter()
+    try:
+        if service.model is None:
+            raise HTTPException(status_code=503, detail="Aucun modèle chargé")
+        X = pd.DataFrame([features.model_dump()])
+        prediction = round(max(0.0, float(service.model.predict(X)[0])), 2)
+    except Exception as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else repr(exc)
+        store.log_prediction(
+            model_version=service.version,
+            features=features.model_dump(),
+            duration_ms=(time.perf_counter() - start) * 1000,
+            status="error",
+            error=str(detail)[:500],
+        )
+        raise
+
+    prediction_id = store.log_prediction(
+        model_version=service.version,
+        features=features.model_dump(),
+        prediction=prediction,
+        duration_ms=(time.perf_counter() - start) * 1000,
+        status="ok",
+    )
+    return PredictionResponse(
+        prediction_id=prediction_id, prediction=prediction, model_name=service.name, model_version=service.version
+    )
+
+
+@app.post("/feedback", status_code=201)
+def feedback(body: FeedbackRequest) -> dict:
+    """Enregistre la valeur réellement observée pour une prédiction passée."""
+    if not store.add_feedback(body.prediction_id, body.actual):
+        raise HTTPException(status_code=404, detail=f"Prédiction {body.prediction_id} inconnue")
+    return {"status": "enregistré", "prediction_id": body.prediction_id}
 
 
 @app.post("/reload")

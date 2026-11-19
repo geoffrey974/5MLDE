@@ -31,3 +31,6 @@ promotion:
 
 pipeline:
   interval_seconds: 60 # fréquence de vérification de l'arrivée de nouveaux lots
+
+api:
+  database_url: "sqlite:///predictions.db"
