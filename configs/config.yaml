@@ -2,6 +2,7 @@ data:
   source_url: "https://archive.ics.uci.edu/static/public/275/bike+sharing+dataset.zip"
   raw_dir: "data/raw"
   batches_dir: "data/batches"
+  landing_dir: "data/landing" # lots traités par le pipeline
   processed_dir: "data/processed"
   file: "hour.csv"
 
@@ -27,3 +28,6 @@ mlflow:
 promotion:
   # Seuil fixé à partir des runs observés (RMSE entre 85 et 98) : rejette un modèle nettement dégradé.
   max_rmse: 100
+
+pipeline:
+  interval_seconds: 60 # fréquence de vérification de l'arrivée de nouveaux lots

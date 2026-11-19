@@ -45,6 +45,7 @@ Chaque lot est vérifié avant tout traitement : colonnes attendues, types, plag
 ### Suivi des expériences (Interface MLflow)
 Dans un terminal, laissé ouvert : 
 ```
+mlflow db upgrade sqlite://mlflow.db        # première fois uniquement : crée la base
 mlflow server --backend-store-uri sqlite:///mlflow.db --artifacts-destination ./mlartifacts --host 127.0.0.1 --port 5000
 ```
 
@@ -81,6 +82,28 @@ Règle de promotion, appliquée dans cet ordre :
 4. Sinon, les deux versions sont évaluées sur le même lot (mois suivant l'entrainement du challenger) -> **promue** seulement si sa RMSE est plus basse.
 
 Chaque décision est tracée sur la version (tags `promotion_decision` et `promotion_reason`). Une version promue garde le numéro du champion remplacé (`previous_champion`), ce qui permet le retour arrière. La version annulée reçoit le tag `rolled_back`.
+
+### Orchestration (Prefect)
+
+Les lots arrivent un par un dans `data/landing` (simulation de l'arrivée mensuelle des données). Toutes les 60 s (`pipeline.interval_seconds`), le pipeline vérifie s'il y a un nouveau lot et, si oui, enchaîne : contrôle qualité → entraînement → promotion.
+
+Avec MLflow démarré, dans trois terminaux :
+```
+prefect server start                                          # interface : http://127.0.0.1:4200
+prefect config set PREFECT_API_URL=http://127.0.0.1:4200/api  # une seule fois
+python -m bike_mlops.pipeline.flow --serve                     # déclenchement automatique
+```
+```
+python -m bike_mlops.pipeline.simulate -n 12    # fait arriver les 12 premiers mois
+python -m bike_mlops.pipeline.simulate          # fait arriver le mois suivant
+python -m bike_mlops.pipeline.flow              # exécution unique, sans planification
+```
+
+Gestion des échecs :
+- **reprises automatiques** sur les étapes dépendant de MLflow (indisponibilité passagère) ;
+- **pas de reprise** sur le contrôle qualité : un lot invalide bloque la chaîne, aucun modèle n'est entraîné ;
+- **une seule exécution à la fois** (`limit=1`) ;
+- **alerte** à chaque échec : log `ALERTE`, ligne ajoutée dans `logs/alerts.jsonl`, et message envoyé au webhook `ALERT_WEBHOOK_URL` s'il est défini (Discord, Slack...).
 
 ### Tests
 ```
