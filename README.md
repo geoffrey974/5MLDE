@@ -2,6 +2,8 @@
 
 Projet MLOps : Prévision du nombre de location de vélos à partir du jeu de données UCI Bike Sharing.
 
+lien vers le repo Git : https://github.com/geoffrey974/5MLDE/tree/develop
+
 ## Installation
 
 Prérequis : Python 3.13, Docker
@@ -59,7 +61,26 @@ Chaque lot est validé avant l'entraînement : un lot non conforme interrompt l'
 - **paramètres** : les hyperparamètres du modèle, les périodes d'entraînement, le nombre de lots et de lignes et la liste des features.
 - **métriques** : RMSE, MAE, et R² sur le mois suivant.
 - **données** : empreinte SHA-256 des lots utilisés (tag `data_sha256`)
-- **artefact** : la pipeline complet (prétraitement + RandomForest), avec sa signature d'entrée.
+- **artefact** : le pipeline complet (prétraitement + RandomForest), avec sa signature d'entrée.
+- **registre** : chaque modèle est enregistré comme une nouvelle version, avec les tags `train_until`, `eval_batch`, `rmse`, `data_sha256` et `validation_status`.
+
+### Promotion et retour en arrière
+
+La version en service porte l'alias `champion` dans le registre MLflow (`models:/bike-demand@champion`).
+
+```
+python -m bike_mlops.models.registry promote 2          # Applique la règle de mise en service à la version 2
+python -m bike_mlops.models.registry rollback           # Remet en service le champion précédent
+python -m bike_mlops.models.registry rollback --to 1    # Remet en service une version précise (version 1)
+```
+
+Règle de promotion, appliquée dans cet ordre :
+1. RMSE de la version au-dessus du seuil `promotion.max_rmse` (config) -> **rejetée**
+2. Aucun champion en service -> **promue**
+3. Données d'entrainement pas plus récentes que celles du champion -> **rejetée** (le champion a pu voir le mois d'évaluation : comparaison faussée)
+4. Sinon, les deux versions sont évaluées sur le même lot (mois suivant l'entrainement du challenger) -> **promue** seulement si sa RMSE est plus basse.
+
+Chaque décision est tracée sur la version (tags `promotion_decision` et `promotion_reason`). Une version promue garde le numéro du champion remplacé (`previous_champion`), ce qui permet le retour arrière. La version annulée reçoit le tag `rolled_back`.
 
 ### Tests
 ```

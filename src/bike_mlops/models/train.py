@@ -2,21 +2,24 @@
 import argparse
 import hashlib
 import logging
-import os
 from pathlib import Path
 
 import mlflow
 import mlflow.sklearn
 import numpy as np
 import pandas as pd
+
 from mlflow.models import infer_signature
+from mlflow import MlflowClient
+
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.pipeline import Pipeline
 
-from bike_mlops.config import load_config
+from bike_mlops.config import load_config, get_tracking_uri
 from bike_mlops.data.validate import validate_file
 from bike_mlops.features.preprocess import build_preprocessor, split_features_target
+from bike_mlops.models.registry import tag_version
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +67,8 @@ def data_fingerprint(paths: list[Path]) -> str:
         h.update(Path(p).read_bytes())
     return h.hexdigest()
 
-def train(cfg: dict, until: str | None = None) -> str:
-    """Entraîne, évalue et enregistre un modèle dans MLflow. Renvoie l'identifiant du run."""
+def train(cfg: dict, until: str | None = None) -> tuple[str, str]:
+    """Entraîne, évalue et enregistre le modèle dans MLflow et le registre. Renvoie `run_id` et `version`"""
     train_paths, eval_path = select_batches(list_batches(cfg["data"]["batches_dir"]), until)
     train_df = load_validated(train_paths)
     eval_df = load_validated([eval_path])
@@ -73,8 +76,7 @@ def train(cfg: dict, until: str | None = None) -> str:
     X_eval, y_eval = split_features_target(eval_df, cfg)
 
     # La variable d'environnement est prioritaire sur la config
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", cfg["mlflow"]["tracking_uri"]))
-    mlflow.set_experiment(cfg["mlflow"]["experiment"])
+    mlflow.set_tracking_uri(get_tracking_uri(cfg))
 
     train_until = train_paths[-1].stem.removeprefix("batch_")
     with mlflow.start_run(run_name=f"train-until-{train_until}") as run:
@@ -92,19 +94,29 @@ def train(cfg: dict, until: str | None = None) -> str:
             "features": ",".join(X_train.columns),
         })
 
-        mlflow.set_tag("data_sha256", data_fingerprint(train_paths))
+        data_sha256 = data_fingerprint(train_paths)
+        mlflow.set_tag("data_sha256", data_sha256)
         mlflow.log_metrics(metrics)
-        mlflow.sklearn.log_model(
+        model_info = mlflow.sklearn.log_model(
             model,
-            name = "model",
+            name="model",
             signature=infer_signature(X_eval, model.predict(X_eval)),
             input_example=X_eval.head(3),
             skops_trusted_types=["sklearn.tree._tree.Tree"],
+            registered_model_name=cfg["model"]["name"],
         )
 
-        logger.info("Run %s : %s", run.info.run_id, metrics)
-        return run.info.run_id
-
+        version = str(model_info.registered_model_version)
+        tag_version(MlflowClient(), cfg["model"]["name"], version, {
+            "train_until": train_until,
+            "eval_batch": eval_path.stem,
+            "rmse": round(metrics["rmse"], 3),
+            "data_sha256": data_sha256,
+            "validation_status": "passed",
+        })
+        logger.info("Run %s -> Version %s : %s", run.info.run_id, version, metrics)
+        return run.info.run_id, version
+    
 def main() -> None:
     """Point d'entrée"""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
