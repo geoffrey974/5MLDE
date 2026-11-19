@@ -60,11 +60,12 @@ class PredictionStore:
             session.commit()
             return row.id
 
-    def add_feedback(self, prediction_id: int, actual: float) -> bool:
-        """Enregistre la valeur observée. Renvoie False si la prédiction n'existe pas."""
-        with Session(self.engine) as session:
-            if session.get(PredictionLog, prediction_id) is None:
-                return False
+    def add_feedback(self, prediction_id: int, actual: float) -> PredictionLog | None:
+        """Enregistre la valeur observée. Renvoie la prédiction concernée, ou None si elle n'existe pas."""
+        with Session(self.engine, expire_on_commit=False) as session:
+            logged = session.get(PredictionLog, prediction_id)
+            if logged is None:
+                return None
             session.add(Feedback(prediction_id=prediction_id, actual=actual))
             session.commit()
-            return True
+            return logged

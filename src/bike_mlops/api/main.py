@@ -11,7 +11,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from mlflow import MlflowClient
+from prometheus_fastapi_instrumentator import Instrumentator
 
+from bike_mlops.api.metrics import FEEDBACK_ABS_ERROR, MODEL_VERSION, PREDICTED_VALUE, PREDICTIONS
 from bike_mlops.api.schemas import BikeFeatures, FeedbackRequest, PredictionResponse
 from bike_mlops.api.storage import PredictionStore, get_database_url
 from bike_mlops.config import get_tracking_uri, load_config
@@ -35,6 +37,7 @@ class ModelService:
         champion = MlflowClient().get_model_version_by_alias(self.name, CHAMPION)
         self.model = mlflow.sklearn.load_model(f"models:/{self.name}/{champion.version}")
         self.version = str(champion.version)
+        MODEL_VERSION.set(int(self.version))
         logger.info("Modèle %s v%s chargé", self.name, self.version)
         return self.version
 
@@ -55,12 +58,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Bike demand API", version="1.0", lifespan=lifespan)
+Instrumentator(excluded_handlers=["/metrics"]).instrument(
+    app, latency_lowr_buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
+).expose(app, include_in_schema=False)
 
 
 @app.exception_handler(RequestValidationError)
 async def invalid_input(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Entrée invalide : réponse 422, et l'erreur est enregistrée comme les prédictions."""
     if request.url.path == "/predict":
+        PREDICTIONS.labels(model_version=str(service.version), status="error").inc()
         first = exc.errors()[0]
         store.log_prediction(
             model_version=service.version,
@@ -100,6 +107,7 @@ def predict(features: BikeFeatures) -> PredictionResponse:
         prediction = round(max(0.0, float(service.model.predict(X)[0])), 2)
     except Exception as exc:
         detail = exc.detail if isinstance(exc, HTTPException) else repr(exc)
+        PREDICTIONS.labels(model_version=str(service.version), status="error").inc()
         store.log_prediction(
             model_version=service.version,
             features=features.model_dump(),
@@ -116,6 +124,8 @@ def predict(features: BikeFeatures) -> PredictionResponse:
         duration_ms=(time.perf_counter() - start) * 1000,
         status="ok",
     )
+    PREDICTIONS.labels(model_version=str(service.version), status="ok").inc()
+    PREDICTED_VALUE.observe(prediction)
     return PredictionResponse(
         prediction_id=prediction_id, prediction=prediction, model_name=service.name, model_version=service.version
     )
@@ -124,8 +134,11 @@ def predict(features: BikeFeatures) -> PredictionResponse:
 @app.post("/feedback", status_code=201)
 def feedback(body: FeedbackRequest) -> dict:
     """Enregistre la valeur réellement observée pour une prédiction passée."""
-    if not store.add_feedback(body.prediction_id, body.actual):
+    logged = store.add_feedback(body.prediction_id, body.actual)
+    if logged is None:
         raise HTTPException(status_code=404, detail=f"Prédiction {body.prediction_id} inconnue")
+    if logged.prediction is not None:
+        FEEDBACK_ABS_ERROR.labels(model_version=str(logged.model_version)).observe(abs(body.actual - logged.prediction))
     return {"status": "enregistré", "prediction_id": body.prediction_id}
 
 
