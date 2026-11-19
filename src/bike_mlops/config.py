@@ -13,7 +13,6 @@ def load_config(path: str | Path | None = None) -> dict:
     with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    # Un fichier vide renvoie None
     if not cfg:
         raise ValueError(f"Fichier de configuration vide : {config_path}")
     return cfg

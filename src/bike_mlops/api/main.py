@@ -1,4 +1,5 @@
 """API de prédiction : sert le modèle champion du registre MLflow et enregistre chaque appel."""
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -31,15 +32,27 @@ class ModelService:
         self.model = None
         self.version: str | None = None
 
-    def load(self) -> str:
-        """Charge la version portant l'alias champion. Renvoie son numéro."""
+    def champion_version(self) -> str:
+        """Numéro de la version qui porte actuellement l'alias champion dans le registre."""
         mlflow.set_tracking_uri(get_tracking_uri(self.cfg))
-        champion = MlflowClient().get_model_version_by_alias(self.name, CHAMPION)
-        self.model = mlflow.sklearn.load_model(f"models:/{self.name}/{champion.version}")
-        self.version = str(champion.version)
-        MODEL_VERSION.set(int(self.version))
-        logger.info("Modèle %s v%s chargé", self.name, self.version)
-        return self.version
+        return str(MlflowClient().get_model_version_by_alias(self.name, CHAMPION).version)
+
+    def load(self, version: str | None = None) -> str:
+        """Charge une version (le champion par défaut). Renvoie son numéro."""
+        version = version or self.champion_version()
+        self.model = mlflow.sklearn.load_model(f"models:/{self.name}/{version}")
+        self.version = version
+        MODEL_VERSION.set(int(version))
+        logger.info("Modèle %s v%s chargé", self.name, version)
+        return version
+
+    def refresh(self) -> bool:
+        """Recharge le modèle seulement si le champion a changé (promotion ou retour arrière)."""
+        version = self.champion_version()
+        if version == self.version:
+            return False
+        self.load(version)
+        return True
 
 
 cfg = load_config()
@@ -47,14 +60,26 @@ service = ModelService(cfg)
 store = PredictionStore(get_database_url(cfg))
 
 
+async def watch_champion(interval: float) -> None:
+    """Vérifie périodiquement le registre : chaque worker suit seul les changements de champion."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(service.refresh)
+        except Exception as exc:
+            logger.warning("Vérification du champion impossible : %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Au démarrage : charge le champion. Si MLflow est indisponible, l'API démarre quand même (503)."""
+    """Au démarrage : charge le champion puis surveille ses changements. Sans MLflow, l'API démarre en 503."""
     try:
-        service.load()
+        await asyncio.to_thread(service.load)
     except Exception as exc:
         logger.error("Modèle non chargé au démarrage : %s", exc)
+    watcher = asyncio.create_task(watch_champion(cfg["api"]["refresh_seconds"]))
     yield
+    watcher.cancel()
 
 
 app = FastAPI(title="Bike demand API", version="1.0", lifespan=lifespan)

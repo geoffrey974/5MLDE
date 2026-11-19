@@ -23,4 +23,5 @@ FEEDBACK_ABS_ERROR = Histogram(
 MODEL_VERSION = Gauge(
     "bike_model_version",
     "Numéro de la version du modèle champion actuellement servie (0 si aucun modèle chargé)",
+    multiprocess_mode="livemax",
 )

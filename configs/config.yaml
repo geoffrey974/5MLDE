@@ -2,11 +2,11 @@ data:
   source_url: "https://archive.ics.uci.edu/static/public/275/bike+sharing+dataset.zip"
   raw_dir: "data/raw"
   batches_dir: "data/batches"
-  landing_dir: "data/landing" # lots traités par le pipeline
+  landing_dir: "data/landing"
   processed_dir: "data/processed"
   file: "hour.csv"
 
-target: "cnt" # Pour prédire le nombre total de locations
+target: "cnt"
 
 # exclus casual et registered (leur somme = cnt --> fuite de données)
 # exclus instant et dteday (simples identifiants)
@@ -30,7 +30,8 @@ promotion:
   max_rmse: 100
 
 pipeline:
-  interval_seconds: 60 # fréquence de vérification de l'arrivée de nouveaux lots
+  interval_seconds: 60
 
 api:
   database_url: "sqlite:///predictions.db"
+  refresh_seconds: 30

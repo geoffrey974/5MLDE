@@ -1,8 +1,10 @@
 """Persistance des prédictions (entrées, version, durée, erreurs) et des retours terrain."""
 import os
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
@@ -48,9 +50,16 @@ def get_database_url(cfg: dict) -> str:
 class PredictionStore:
     """Écrit les prédictions et les retours dans la base (SQLite en local, PostgreSQL en Docker)."""
 
-    def __init__(self, url: str) -> None:
-        self.engine = create_engine(url)
-        Base.metadata.create_all(self.engine)
+    def __init__(self, url: str, attempts: int = 5) -> None:
+        self.engine = create_engine(url, pool_pre_ping=True)
+        for attempt in range(1, attempts + 1):
+            try:
+                Base.metadata.create_all(self.engine)
+                break
+            except SQLAlchemyError:
+                if attempt == attempts:
+                    raise
+                time.sleep(2)
 
     def log_prediction(self, **fields) -> int:
         """Enregistre un appel à /predict. Renvoie son identifiant."""

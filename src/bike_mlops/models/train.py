@@ -75,7 +75,6 @@ def train(cfg: dict, until: str | None = None) -> tuple[str, str]:
     X_train, y_train = split_features_target(train_df, cfg)
     X_eval, y_eval = split_features_target(eval_df, cfg)
 
-    # La variable d'environnement est prioritaire sur la config
     mlflow.set_tracking_uri(get_tracking_uri(cfg))
 
     train_until = train_paths[-1].stem.removeprefix("batch_")

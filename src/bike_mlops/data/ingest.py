@@ -23,12 +23,10 @@ def download_raw(cfg: dict) -> Path:
     target = raw_dir / cfg["data"]["file"]
 
     if target.exists():
-        # Ne télécharge pas si le fichier existe déjà
 
         logger.info("Les données brutes sont déjà présentes : %s", target)
         return target
 
-    # Téléchargement du dataset
     url = cfg["data"]["source_url"]
     logger.info("Téléchargement depuis %s", url)
     response = requests.get(url, timeout=60)
@@ -58,7 +56,6 @@ def split_into_batches(raw_path: Path, batches_dir: str | Path) -> list[Path]:
 
     paths=[]
 
-    # la period est de 1 mois, pour simuler l'arrivé de nouvelles donées de manière progressive
     for period, group in df.groupby(df["dteday"].dt.to_period("M")):
         path = out_dir / f"batch_{period}.csv"
         group.to_csv(path, index=False)

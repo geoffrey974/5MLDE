@@ -50,7 +50,6 @@ def cfg(batches_dir: Path, tmp_path: Path, monkeypatch) -> dict:
     config["data"]["batches_dir"] = str(batches_dir)
     config["model"]["params"]["n_estimators"] = 5
 
-    # MLflow de test isolé avec base SQLite et artefacts dans le dossier temporaire
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}")
 

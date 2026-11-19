@@ -74,7 +74,6 @@ def training_pipeline() -> str | None:
     """Ré-entraîne seulement si un nouveau lot est arrivé. Renvoie la version créée, sinon None."""
     log = get_run_logger()
     cfg = load_config()
-    # On entraîne sur les lots arrivés, pas sur l'archive complète
     cfg["data"]["batches_dir"] = cfg["data"]["landing_dir"]
     mlflow.set_tracking_uri(get_tracking_uri(cfg))
 
@@ -83,7 +82,6 @@ def training_pipeline() -> str | None:
         log.info("Pas assez de lots arrivés (%d) : il en faut 2 (entraînement + évaluation)", len(batches))
         return None
 
-    # Le dernier lot arrivé sert à l'évaluation, on entraîne jusqu'au précédent
     until = batches[-2].stem.removeprefix("batch_")
     last = last_trained_month(cfg)
     if last is not None and until <= last:

@@ -39,7 +39,6 @@ SCHEMA = pa.DataFrameSchema(
         pa.Check(lambda df: df["cnt"] == df["casual"] + df["registered"], error = "cnt != casual + registered"),
     ],
 
-    # Une seule ligne par date et par heure
     unique=["dteday", "hr"],
 )
 

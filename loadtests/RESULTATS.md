@@ -62,6 +62,17 @@ locust -f loadtests/locustfile.py --host http://127.0.0.1:8000 --headless -u 50 
 - une écriture en base asynchrone, hors du temps de réponse ;
 - un modèle plus léger (moins d'arbres), à valider contre la règle de promotion.
 
+## Validation de la recommandation (Docker, 4 workers + PostgreSQL)
+
+La configuration recommandée a été déployée avec `docker compose` (API avec `--workers 4`, base PostgreSQL), puis testée avec le même scénario à 100 utilisateurs pendant 60 s (`results/load_docker_pg_100u_*.csv`).
+
+| Configuration | Débit (req/s) | Médiane | p95 | Erreurs |
+|---|---|---|---|---|
+| 4 workers + SQLite (local) | 47,2 | 230 ms | 4,7 s | **1,8 %** |
+| **4 workers + PostgreSQL (Docker)** | **50,8** | 860 ms | 1,7 s | **0 %** |
+
+Les erreurs `database is locked` disparaissent avec PostgreSQL. À 100 utilisateurs, la latence reste au-dessus de l'objectif : cela confirme qu'une instance de 4 workers vise environ 50 utilisateurs simultanés, et qu'il faut une deuxième instance au-delà. Les métriques Prometheus restent cohérentes en multi-processus : 2 342 prédictions comptées, et 2 342 lignes en base.
+
 ## Limites
 
 - Locust tourne sur la même machine que l'API : il lui prend du CPU, donc les débits mesurés sont **sous-estimés**.

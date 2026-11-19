@@ -128,5 +128,16 @@ def test_feedback_error_is_measured(client):
     assert metric(client, total) == pytest.approx(total_before + 10)
 
 
+def test_refresh_loads_new_champion_only_when_it_changes(client, monkeypatch):
+    loaded = []
+    monkeypatch.setattr(main.mlflow.sklearn, "load_model", lambda uri: loaded.append(uri) or FakeModel())
+    monkeypatch.setattr(service, "champion_version", lambda: "7")
+    assert service.refresh() is False
+    monkeypatch.setattr(service, "champion_version", lambda: "8")
+    assert service.refresh() is True
+    assert service.version == "8"
+    assert loaded == ["models:/bike-demand/8"]
+
+
 def test_health_reports_model_version(client):
     assert client.get("/health").json() == {"status": "ok", "model_name": "bike-demand", "model_version": "7"}

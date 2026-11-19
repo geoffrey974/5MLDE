@@ -18,7 +18,6 @@ from bike_mlops.features.preprocess import split_features_target
 
 logger = logging.getLogger(__name__)
 
-# Alias de la version en service
 CHAMPION = "champion"
 
 def tag_version(client: MlflowClient, name: str, version: str, tags: dict) -> None:
@@ -60,7 +59,6 @@ def promote(client: MlflowClient, cfg: dict, version: str) -> bool:
         # Le champion a pu être entraîné sur le mois d'évaluation, la comparaison serait donc faussée.
         promoted, reason = False, f"Données pas plus récentes que le champion v{champion.version}"
     else:
-        # comparaison équitable, les deux versions sont évaluées sur le même lot
         champion_rmse = rmse_on_batch(cfg, champion.version, batch_path)
         promoted = challenger_rmse < champion_rmse
         verdict = "meilleure" if promoted else "pas meilleure"
@@ -72,7 +70,6 @@ def promote(client: MlflowClient, cfg: dict, version: str) -> bool:
     })
     if promoted:
         if champion is not None:
-            # Mémorise le champion remplacé pour pouvoir revenir en arrière
             tag_version(client, name, version, {"previous_champion": champion.version})
         client.set_registered_model_alias(name, CHAMPION, str(version))
     logger.info("Version %s %s : %s", version, "PROMUE" if promoted else "REJETÉE", reason)

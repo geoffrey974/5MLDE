@@ -1,0 +1,17 @@
+.git
+.venv
+.env
+.pytest_cache
+.ruff_cache
+**/__pycache__
+*.pyc
+*.egg-info
+data
+logs
+mlartifacts
+mlruns
+mlflow.db
+predictions.db
+loadtests
+monitoring
+tests
