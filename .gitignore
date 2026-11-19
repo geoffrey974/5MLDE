@@ -5,3 +5,6 @@ bike_mlops.egg-info
 __pycache__
 /data/
 .pytest_cache/
+mlflow.db
+/mlartifacts/
+/mlruns/

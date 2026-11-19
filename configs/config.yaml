@@ -4,3 +4,22 @@ data:
   batches_dir: "data/batches"
   processed_dir: "data/processed"
   file: "hour.csv"
+
+target: "cnt" # Pour prédire le nombre total de locations
+
+# exclus casual et registered (leur somme = cnt --> fuite de données)
+# exclus instant et dteday (simples identifiants)
+features:
+  numeric: ["temp", "atemp", "hum", "windspeed"]
+  categorical: ["season", "yr", "mnth", "hr", "holiday", "weekday", "workingday", "weathersit"]
+
+model:
+  name: "bike-demand"
+  params:
+    n_estimators: 100
+    max_depth: 12
+    random_state: 42
+
+mlflow:
+  tracking_uri: "http://127.0.0.1:5000"
+  experiment: "bike-sharing"

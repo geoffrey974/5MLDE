@@ -40,6 +40,26 @@ python -m bike_mlops.data.validate data\batches\batch_2011-01.csv
 
 Chaque lot est vérifié avant tout traitement : colonnes attendues, types, plages de valeurs, absence de valeurs manquantes, unicité date/heure et cohérence 'cnt = casual + registered'. Un lot non conforme lève une erreur, et la commande renvoie le code 1, ce qui bloque la suite de la chaîne.
 
+### Suivi des expériences (Interface MLflow)
+Dans un terminal, laissé ouvert : 
+```
+mlflow server --backend-store-uri sqlite:///mlflow.db --artifacts-destination ./mlartifacts --host 127.0.0.1 --port 5000
+```
+
+Interface : http://127.0.0.1:5000 
+
+### Entraînement
+
+```
+python -m bike_mlops.models.train --until 2011-12   # s'entraîne sur les lots jusqu'à 2011-12, puis évalue sur 2012-01
+python -m bike_mlops.models.train                    # par défaut : tous les lots sauf le dernier, qui sert à l'évaluation 
+```
+
+Chaque lot est validé avant l'entraînement : un lot non conforme interrompt l'exécution. Chaque run enregistre dans MLflow : 
+- **paramètres** : les hyperparamètres du modèle, les périodes d'entraînement, le nombre de lots et de lignes et la liste des features.
+- **métriques** : RMSE, MAE, et R² sur le mois suivant.
+- **données** : empreinte SHA-256 des lots utilisés (tag `data_sha256`)
+- **artefact** : la pipeline complet (prétraitement + RandomForest), avec sa signature d'entrée.
 
 ### Tests
 ```
