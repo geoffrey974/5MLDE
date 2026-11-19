@@ -1,2 +1,12 @@
 .env
 .venv
+bike_mlops.egg-info
+*.pyc
+__pycache__
+/data/
+.pytest_cache/
+mlflow.db
+/mlartifacts/
+/mlruns/
+/logs/
+predictions.db

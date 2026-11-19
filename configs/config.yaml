@@ -1,0 +1,37 @@
+data:
+  source_url: "https://archive.ics.uci.edu/static/public/275/bike+sharing+dataset.zip"
+  raw_dir: "data/raw"
+  batches_dir: "data/batches"
+  landing_dir: "data/landing"
+  processed_dir: "data/processed"
+  file: "hour.csv"
+
+target: "cnt"
+
+# exclus casual et registered (leur somme = cnt --> fuite de données)
+# exclus instant et dteday (simples identifiants)
+features:
+  numeric: ["temp", "atemp", "hum", "windspeed"]
+  categorical: ["season", "yr", "mnth", "hr", "holiday", "weekday", "workingday", "weathersit"]
+
+model:
+  name: "bike-demand"
+  params:
+    n_estimators: 100
+    max_depth: 12
+    random_state: 42
+
+mlflow:
+  tracking_uri: "http://127.0.0.1:5000"
+  experiment: "bike-sharing"
+
+promotion:
+  # Seuil fixé à partir des runs observés (RMSE entre 85 et 98) : rejette un modèle nettement dégradé.
+  max_rmse: 100
+
+pipeline:
+  interval_seconds: 60
+
+api:
+  database_url: "sqlite:///predictions.db"
+  refresh_seconds: 30

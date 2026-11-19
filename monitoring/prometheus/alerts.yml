@@ -1,0 +1,34 @@
+groups:
+  - name: bike-api
+    rules:
+      - alert: ApiIndisponible
+        expr: up{job="bike-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "L'API de prédiction ne répond plus à Prometheus depuis 1 minute"
+
+      - alert: AucunModeleCharge
+        expr: bike_model_version == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "L'API tourne sans modèle chargé : toutes les prédictions renvoient 503"
+
+      - alert: LatencePredictElevee
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{handler="/predict"}[1m]))) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 de /predict au-dessus de 500 ms (seuil du dimensionnement)"
+
+      - alert: TauxErreurEleve
+        expr: sum(rate(http_requests_total{status="5xx"}[1m])) / sum(rate(http_requests_total[1m])) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Plus de 1 % de réponses 5xx sur l'API"

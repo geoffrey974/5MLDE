@@ -1,0 +1,155 @@
+x-app: &app
+  image: bike-mlops:0.1.0
+  pull_policy: never
+  restart: unless-stopped
+
+x-urls:
+  mlflow-db: &mlflow-db postgresql+psycopg2://${POSTGRES_USER:-mlops}:${POSTGRES_PASSWORD:-mlops}@postgres:5432/mlflow
+  predictions-db: &predictions-db postgresql+psycopg2://${POSTGRES_USER:-mlops}:${POSTGRES_PASSWORD:-mlops}@postgres:5432/predictions
+
+services:
+  postgres:
+    image: postgres:16.10
+    container_name: bike-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mlops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlops}
+      POSTGRES_DB: mlflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlops} -d mlflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mlflow:
+    <<: *app
+    container_name: bike-mlflow
+    user: root
+    command:
+      - sh
+      - -c
+      - >-
+        mlflow db upgrade $${BACKEND_URI} &&
+        exec mlflow server --backend-store-uri $${BACKEND_URI} --artifacts-destination /mlartifacts
+        --host 0.0.0.0 --port 5000 --workers 2
+        --allowed-hosts mlflow:5000,localhost:5000,127.0.0.1:5000
+    environment:
+      BACKEND_URI: *mlflow-db
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-artifacts:/mlartifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  api:
+    <<: *app
+    build: .
+    pull_policy: build
+    container_name: bike-api
+    command:
+      - sh
+      - -c
+      - >-
+        rm -rf $${PROMETHEUS_MULTIPROC_DIR} && mkdir -p $${PROMETHEUS_MULTIPROC_DIR} &&
+        exec uvicorn bike_mlops.api.main:app --host 0.0.0.0 --port 8000 --workers 4
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      DATABASE_URL: *predictions-db
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  prefect:
+    <<: *app
+    container_name: bike-prefect
+    command: prefect server start --host 0.0.0.0 --port 4200
+    environment:
+      PREFECT_HOME: /home/app/.prefect
+      PREFECT_UI_API_URL: http://localhost:4200/api
+    ports:
+      - "4200:4200"
+    volumes:
+      - prefect-data:/home/app/.prefect
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  pipeline:
+    <<: *app
+    container_name: bike-pipeline
+    command: python -m bike_mlops.pipeline.flow --serve
+    environment:
+      PREFECT_API_URL: http://prefect:4200/api
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      prefect:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: bike-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    container_name: bike-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/bike-api.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  mlflow-artifacts:
+  prefect-data:
+  prometheus-data:
+  grafana-data:
